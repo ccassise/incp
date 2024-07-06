@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <netdb.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,6 +33,13 @@
 #define FILEINFO_ISDIR (1 << 9) /* Directory. */
 #define FILEINFO_ISREG (1 << 10) /* Regular file. */
 #define FILEINFO_ISLNK (1 << 11) /* Symbolic link. */
+
+void print_usage(void)
+{
+    puts("USAGE:");
+    puts("\tincp -l [port]");
+    puts("\tincp source [source...] address[:port]:target");
+}
 
 typedef struct FileInfo {
     int32_t mode;
@@ -310,7 +318,25 @@ static int incp_connect(int argc, char* argv[])
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
-    if ((err = getaddrinfo("127.0.0.1", DEFAULT_PORT, &hints, &ailist)) != 0) {
+    /* Parse the address, port, and destination from the last argument. They
+     * should be in the form 127.0.0.1:4627:dest/path and port is optional. */
+    char* address = strtok(argv[argc - 1], ":");
+    if (address == NULL) {
+        print_usage();
+        return -1;
+    }
+    char* port = strtok(NULL, ":");
+    if (port == NULL) {
+        print_usage();
+        return -1;
+    }
+    char* dest = strtok(NULL, ":");
+    if (dest == NULL) {
+        dest = port;
+        port = NULL;
+    }
+
+    if ((err = getaddrinfo(address, port == NULL ? DEFAULT_PORT : port, &hints, &ailist)) != 0) {
         fprintf(stderr, "Error: getaddrinfo: %s\n", gai_strerror(err));
         return -1;
     }
@@ -345,14 +371,14 @@ static int incp_connect(int argc, char* argv[])
 
     /* Send server destination info. */
     /* If there are more than 1 source files we expect the destination file to be a directory. */
-    size_t len = strlen(argv[argc - 1]);
+    size_t len = strlen(dest);
     if (len >= sizeof(finfo.name) - 1) {
         errno = ENAMETOOLONG;
         perror("Error: destination path");
         err = -1;
         goto cleanup;
     }
-    strcpy(finfo.name, argv[argc - 1]);
+    strcpy(finfo.name, dest);
     if ((send_len = fileinfo_snprint(&finfo, buffer, sizeof(buffer))) >= (int)sizeof(buffer)) {
         errno = ENAMETOOLONG;
         perror("Error: destination path");
@@ -453,7 +479,7 @@ cleanup:
     return err;
 }
 
-static int incp_listen(void)
+static int incp_listen(const char* port)
 {
     struct addrinfo* ailist;
     struct addrinfo* aip;
@@ -466,7 +492,7 @@ static int incp_listen(void)
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
 
-    if ((err = getaddrinfo(NULL, DEFAULT_PORT, &hints, &ailist)) != 0) {
+    if ((err = getaddrinfo(NULL, port, &hints, &ailist)) != 0) {
         fprintf(stderr, "Error: getaddrinfo: %s\n", gai_strerror(err));
         return -1;
     }
@@ -572,7 +598,15 @@ static int incp_listen(void)
         /* Copy file to destination. */
         char path[1024];
         if (destfinfo.mode & FILEINFO_ISDIR) {
-            if (snprintf(path, sizeof(path), "%s/%s", destfinfo.name, srcfinfo.name) >= (int)sizeof(path)) {
+            char* name = strrchr(srcfinfo.name, '/'); /* Only get the file name. */
+            if (name != NULL) {
+                name++; /* Do not start the name with '/'. */
+            } else {
+                name = srcfinfo.name;
+            }
+            size_t len = strlen(destfinfo.name);
+            bool has_sep = len > 0 && destfinfo.name[len - 1] == '/';
+            if (snprintf(path, sizeof(path), "%s%s%s", destfinfo.name, has_sep ? "" : "/", name) >= (int)sizeof(path)) {
                 errno = ENAMETOOLONG;
                 perror("Error");
                 err = -1;
@@ -631,13 +665,6 @@ cleanup:
     return err;
 }
 
-void print_usage(void)
-{
-    puts("USAGE:");
-    puts("\tincp -l");
-    puts("\tincp source ... <address>[:port]:target");
-}
-
 int main(int argc, char* argv[])
 {
     if (argc < 2) {
@@ -652,7 +679,11 @@ int main(int argc, char* argv[])
     }
 
     if (is_listen) {
-        if (incp_listen() != 0) {
+        char* port = NULL;
+        if (argc >= 3) {
+            port = argv[2];
+        }
+        if (incp_listen(port == NULL ? DEFAULT_PORT : port) != 0) {
             exit(EXIT_FAILURE);
         }
     } else {
