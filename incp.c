@@ -1,14 +1,37 @@
+#if defined(_WIN32)
+
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+
+#include <windows.h>
+
+#include <io.h>
+#include <iphlpapi.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
+#pragma comment(lib, "Ws2_32.lib")
+
+typedef ptrdiff_t ssize_t;
+
+#else /* Unix */
+
+#include <netdb.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#endif
+
 #include <errno.h>
 #include <limits.h>
-#include <netdb.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <unistd.h>
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
@@ -135,7 +158,7 @@ static int fileinfo_snprint(const FileInfo* finfo, char* str, size_t n)
     modestr[8] = finfo->mode & FILEINFO_IWOTH ? 'w' : '-';
     modestr[9] = finfo->mode & FILEINFO_IXOTH ? 'x' : '-';
     modestr[10] = '\0';
-    return snprintf(str, n, "%s %ld %s", modestr, finfo->size, finfo->name);
+    return snprintf(str, n, "%s %zu %s", modestr, finfo->size, finfo->name);
 }
 
 /**
@@ -146,6 +169,16 @@ static int fileinfo_snprint(const FileInfo* finfo, char* str, size_t n)
  */
 static int fileinfo_cpyperm(const FileInfo* finfo, char* path)
 {
+#if defined(_WIN32)
+    unsigned short perms = 0;
+    if (finfo->mode & FILEINFO_IRUSR)
+        perms |= S_IREAD;
+    if (finfo->mode & FILEINFO_IWUSR)
+        perms |= S_IWRITE;
+    if (finfo->mode & FILEINFO_IXUSR)
+        perms |= S_IEXEC;
+    return _chmod(path, perms);
+#else
     mode_t perms = 0;
     if (finfo->mode & FILEINFO_IRUSR)
         perms |= S_IRUSR;
@@ -166,6 +199,7 @@ static int fileinfo_cpyperm(const FileInfo* finfo, char* path)
     if (finfo->mode & FILEINFO_IXOTH)
         perms |= S_IXOTH;
     return chmod(path, perms);
+#endif
 }
 
 /**
@@ -178,6 +212,15 @@ static void fileinfo_setperm(FileInfo* finfo, const struct stat* s)
         finfo->mode |= FILEINFO_ISDIR;
     if ((s->st_mode & S_IFMT) == S_IFREG)
         finfo->mode |= FILEINFO_ISREG;
+#if defined(_WIN32)
+    unsigned short perms = s->st_mode & ~S_IFMT;
+    if (perms & S_IREAD)
+        finfo->mode |= FILEINFO_IRUSR;
+    if (perms & S_IWRITE)
+        finfo->mode |= FILEINFO_IWUSR;
+    if (perms & S_IEXEC)
+        finfo->mode |= FILEINFO_IXUSR;
+#else
     mode_t perms = s->st_mode & ~S_IFMT;
     if (perms & S_IRUSR)
         finfo->mode |= FILEINFO_IRUSR;
@@ -197,6 +240,7 @@ static void fileinfo_setperm(FileInfo* finfo, const struct stat* s)
         finfo->mode |= FILEINFO_IWOTH;
     if (perms & S_IXOTH)
         finfo->mode |= FILEINFO_IXOTH;
+#endif
 }
 
 /**
@@ -300,10 +344,49 @@ static int connect_retry(int sockfd, const struct sockaddr* addr, socklen_t sock
             return 0;
         }
         if (numsec <= maxsleep / 2) {
+#if defined(_WIN32)
+            Sleep(numsec * 1000);
+#else
             sleep(numsec);
+#endif
         }
     }
     return -1;
+}
+
+/**
+ * Parses a string of the form <IPv4 address>[:port]:path/to/file/or/directory
+ * and sets the appropriate address, port, and dest strings.
+ *
+ * The input string is modified and address, port, and dest will be pointers to
+ * different areas of the input string.
+ *
+ * Returns -1 if it is not a valid input string, otherwise returns 0 and sets
+ * the given strings.
+ */
+static int parse_destination(char* str, char** address, char** port, char** dest)
+{
+    const char delim = ':';
+    *address = *port = *dest = NULL;
+    char* ptr = strchr(str, delim);
+    if (ptr == NULL) {
+        return -1;
+    }
+    *address = str;
+    *ptr = '\0';
+    ptr++;
+    str = ptr;
+    while (isdigit(*ptr)) {
+        ptr++;
+    }
+    if (*ptr != delim) {
+        *dest = str;
+        return 0;
+    }
+    *port = str;
+    *ptr = '\0';
+    *dest = ptr + 1;
+    return 0;
 }
 
 static int incp_connect(int argc, char* argv[])
@@ -315,25 +398,15 @@ static int incp_connect(int argc, char* argv[])
     int err = 0;
 
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
+    hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
 
     /* Parse the address, port, and destination from the last argument. They
      * should be in the form 127.0.0.1:4627:dest/path and port is optional. */
-    char* address = strtok(argv[argc - 1], ":");
-    if (address == NULL) {
+    char *address, *port, *dest;
+    if (parse_destination(argv[argc - 1], &address, &port, &dest) != 0) {
         print_usage();
         return -1;
-    }
-    char* port = strtok(NULL, ":");
-    if (port == NULL) {
-        print_usage();
-        return -1;
-    }
-    char* dest = strtok(NULL, ":");
-    if (dest == NULL) {
-        dest = port;
-        port = NULL;
     }
 
     if ((err = getaddrinfo(address, port == NULL ? DEFAULT_PORT : port, &hints, &ailist)) != 0) {
@@ -345,7 +418,11 @@ static int incp_connect(int argc, char* argv[])
             continue;
         }
         if (connect_retry(sockfd, aip->ai_addr, aip->ai_addrlen) != 0) {
+#if defined(_WIN32)
+            closesocket(sockfd);
+#else
             close(sockfd);
+#endif
             sockfd = -1;
             continue;
         }
@@ -454,7 +531,8 @@ static int incp_connect(int argc, char* argv[])
             perror("Error: fopen");
             goto cleanup;
         }
-        if (send_file(sockfd, buffer, sizeof(buffer), MSG_NOSIGNAL, srcfile) != 0) {
+        // if (send_file(sockfd, buffer, sizeof(buffer), MSG_NOSIGNAL, srcfile) != 0) {
+        if (send_file(sockfd, buffer, sizeof(buffer), 0, srcfile) != 0) {
             perror("Error: failed to upload file");
             err = -1;
             goto cleanup;
@@ -474,7 +552,11 @@ cleanup:
     if (srcfile != NULL) {
         fclose(srcfile);
     }
+#if defined(_WIN32)
+    closesocket(sockfd);
+#else
     close(sockfd);
+#endif
     freeaddrinfo(ailist);
     return err;
 }
@@ -488,7 +570,7 @@ static int incp_listen(const char* port)
     int err = 0;
 
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
+    hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
 
@@ -502,17 +584,29 @@ static int incp_listen(const char* port)
         }
         int on = 1;
         if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) != 0) {
+#if defined(_WIN32)
+            closesocket(sockfd);
+#else
             close(sockfd);
+#endif
             sockfd = -1;
             continue;
         }
         if (bind(sockfd, aip->ai_addr, aip->ai_addrlen) != 0) {
+#if defined(_WIN32)
+            closesocket(sockfd);
+#else
             close(sockfd);
+#endif
             sockfd = -1;
             continue;
         }
         if (listen(sockfd, BACKLOG) != 0) {
+#if defined(_WIN32)
+            closesocket(sockfd);
+#else
             close(sockfd);
+#endif
             sockfd = -1;
             continue;
         }
@@ -638,7 +732,8 @@ static int incp_listen(const char* port)
             err = -1;
             goto cleanup;
         }
-        if ((err = recv_file(clientfd, buffer, sizeof(buffer), MSG_NOSIGNAL, outfile, srcfinfo.size)) != 0) {
+        // if ((err = recv_file(clientfd, buffer, sizeof(buffer), MSG_NOSIGNAL, outfile, srcfinfo.size)) != 0) {
+        if ((err = recv_file(clientfd, buffer, sizeof(buffer), 0, outfile, srcfinfo.size)) != 0) {
             fprintf(stderr, "Error: an error occurred while trying to download file\n");
             goto cleanup;
         }
@@ -660,8 +755,13 @@ cleanup:
     if (outfile != NULL) {
         fclose(outfile);
     }
+#if defined(_WIN32)
+    closesocket(clientfd);
+    closesocket(sockfd);
+#else
     close(clientfd);
     close(sockfd);
+#endif
     return err;
 }
 
@@ -671,6 +771,14 @@ int main(int argc, char* argv[])
         print_usage();
         exit(EXIT_FAILURE);
     }
+
+#if defined(_WIN32)
+    WSADATA wsadata;
+    if (WSAStartup(MAKEWORD(2, 2), &wsadata) != 0) {
+        fprintf(stderr, "Error: WSAStartup failed\n");
+        exit(EXIT_FAILURE);
+    }
+#endif
 
     int is_listen = strcmp(argv[1], "-l") == 0;
     if (!is_listen && argc < 3) {
@@ -691,6 +799,10 @@ int main(int argc, char* argv[])
             exit(EXIT_FAILURE);
         }
     }
+
+#if defined(_WIN32)
+    WSACleanup();
+#endif
 
     return 0;
 }

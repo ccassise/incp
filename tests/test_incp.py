@@ -114,6 +114,7 @@ class TestIncp(unittest.IsolatedAsyncioTestCase):
         fin = open(expected.absolute(), 'wb')
         fin.write(expected_text)
         fin.close()
+        os.chmod(expected.absolute(), stat.S_IREAD)
         fout = open(actual.absolute(), 'wb')
         fout.write(b'Test text that\n\t should be truncated')
         fout.close()
@@ -136,12 +137,15 @@ class TestIncp(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(actual_info.st_mode & stat.S_IREAD, stat.S_IREAD)
         self.assertEqual(actual_info.st_mode & stat.S_IWRITE, stat.S_IWRITE)
         self.assertEqual(actual_info.st_mode & stat.S_IEXEC, 0)
-        self.assertEqual(actual_info.st_mode & stat.S_IRGRP, 0)
-        self.assertEqual(actual_info.st_mode & stat.S_IWGRP, 0)
-        self.assertEqual(actual_info.st_mode & stat.S_IXGRP, 0)
-        self.assertEqual(actual_info.st_mode & stat.S_IROTH, 0)
-        self.assertEqual(actual_info.st_mode & stat.S_IWOTH, 0)
-        self.assertEqual(actual_info.st_mode & stat.S_IXOTH, 0)
+        # I do not think Windows has a concept of group and other for file
+        # permissions so these would always fail.
+        if (os.name == 'posix'):
+            self.assertEqual(actual_info.st_mode & stat.S_IRGRP, 0)
+            self.assertEqual(actual_info.st_mode & stat.S_IWGRP, 0)
+            self.assertEqual(actual_info.st_mode & stat.S_IXGRP, 0)
+            self.assertEqual(actual_info.st_mode & stat.S_IROTH, 0)
+            self.assertEqual(actual_info.st_mode & stat.S_IWOTH, 0)
+            self.assertEqual(actual_info.st_mode & stat.S_IXOTH, 0)
 
         dir.cleanup()
 
@@ -160,7 +164,7 @@ class TestIncp(unittest.IsolatedAsyncioTestCase):
         f = open(expected.absolute(), 'wb')
         f.write(expected_text)
         f.close()
-        os.chmod(expected.absolute(), stat.S_IREAD | stat.S_IWRITE)
+        os.chmod(expected.absolute(), stat.S_IREAD)
 
 
         receiver = await asyncio.create_subprocess_exec('./incp', '-l')

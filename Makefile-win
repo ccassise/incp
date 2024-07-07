@@ -1,0 +1,30 @@
+CC       = clang
+CFLAGS   = -Wall -Wpedantic -Wextra -D_CRT_SECURE_NO_WARNINGS
+LDFLAGS  =
+FILENAME = Makefile-win
+
+TARGET  = incp
+SOURCES = incp.c
+OBJECTS = incp.o
+
+.c.o:
+	$(CC) $(CFLAGS) -c $<
+
+$(TARGET).exe: $(OBJECTS)
+	$(CC) $(CFLAGS) -o $@ $** $(LDFLAGS)
+
+.PHONY: sanitize
+sanitize:
+	$(MAKE) /F $(FILENAME) CFLAGS="$(CFLAGS) -fsanitize=address" LDFLAGS="$(LDFLAGS) -static-libsan" $(TARGET).exe
+
+.PHONY: release
+release:
+	$(MAKE) /F $(FILENAME) CFLAGS="$(CFLAGS) -O3 -DNDEBUG" $(TARGET).exe
+
+.PHONY: test
+test:
+	python3 tests/test_incp.py
+
+.PHONY: clean
+clean:
+	DEL /F $(TARGET).exe $(TARGET).pdb $(TARGET).lib $(TARGET).exp $(OBJECTS)
