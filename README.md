@@ -19,7 +19,7 @@ Attempt to transfer the source file(s) to the destination directory or file at t
 $ make
 ```
 ### Windows
-Open the Developer Powershell for Visual Studio and then change directory to the project.
+Open the Developer Powershell for Visual Studio and then change directory to the project. `incp` uses the clang frontend for MSVC.
 ```
 $ nmake /F Makefile-win
 ```
