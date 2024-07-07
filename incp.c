@@ -18,6 +18,8 @@ typedef ptrdiff_t ssize_t;
 typedef SOCKET OS_SOCKET;
 #define OS_INVALID_SOCKET INVALID_SOCKET
 
+#define OS_STAT _stat64
+
 #else /* Unix */
 
 #include <netdb.h>
@@ -26,6 +28,8 @@ typedef SOCKET OS_SOCKET;
 
 typedef int OS_SOCKET;
 #define OS_INVALID_SOCKET (-1)
+
+#define OS_STAT stat
 
 #endif
 
@@ -212,7 +216,7 @@ static int fileinfo_cpyperm(const FileInfo* finfo, char* path)
 /**
  * Copy permissions from a stat structure to file info structure.
  */
-static void fileinfo_setperm(FileInfo* finfo, const struct stat* s)
+static void fileinfo_setperm(FileInfo* finfo, const struct OS_STAT* s)
 {
     finfo->mode = 0;
     if ((s->st_mode & S_IFMT) == S_IFDIR)
@@ -248,6 +252,18 @@ static void fileinfo_setperm(FileInfo* finfo, const struct stat* s)
     if (perms & S_IXOTH)
         finfo->mode |= FILEINFO_IXOTH;
 #endif
+}
+
+/**
+ * Converts all Windows path separators \ to /.
+ */
+static void normalize_sep(char* path)
+{
+    for (; *path; path++) {
+        if (*path == '\\') {
+            *path = '/';
+        }
+    }
 }
 
 static int os_closesocket(OS_SOCKET s)
@@ -496,8 +512,8 @@ static int incp_connect(int argc, char* argv[])
     for (size_t i = 0; (int)i < argc - 1; i++) {
         /* Send server source info. */
         memset(&finfo, 0, sizeof(finfo));
-        struct stat statinfo;
-        if ((err = stat(argv[i], &statinfo)) != 0) {
+        struct OS_STAT statinfo;
+        if ((err = OS_STAT(argv[i], &statinfo)) != 0) {
             perror("Error: stat");
             goto cleanup;
         }
@@ -648,8 +664,9 @@ static int incp_listen(const char* port)
         fprintf(stderr, "Error: bad file info\n");
         goto cleanup;
     }
-    struct stat s;
-    if (stat(destfinfo.name, &s) == 0) {
+    normalize_sep(destfinfo.name);
+    struct OS_STAT s;
+    if (OS_STAT(destfinfo.name, &s) == 0) {
         /* File exists. */
         fileinfo_setperm(&destfinfo, &s);
     } else {
@@ -678,6 +695,7 @@ static int incp_listen(const char* port)
             fprintf(stderr, "Error: bad file info\n");
             goto cleanup;
         }
+        normalize_sep(srcfinfo.name);
 
         /* Send OK */
         if ((err = send_all(clientfd, INCP_MSG_OK CRLF, strlen(INCP_MSG_OK CRLF), 0)) == -1) {
@@ -715,7 +733,7 @@ static int incp_listen(const char* port)
         }
         FileInfo info_tocopy;
         memset(&info_tocopy, 0, sizeof(info_tocopy));
-        if (stat(path, &s) == 0) {
+        if (OS_STAT(path, &s) == 0) {
             /* File exists. */
             fileinfo_setperm(&info_tocopy, &s);
         } else {
