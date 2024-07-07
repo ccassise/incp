@@ -166,10 +166,94 @@ class TestIncp(unittest.IsolatedAsyncioTestCase):
         f.close()
         os.chmod(expected.absolute(), stat.S_IREAD)
 
-
         receiver = await asyncio.create_subprocess_exec('./incp', '-l')
         await asyncio.sleep(0.5)
         sender = await asyncio.create_subprocess_exec('./incp', expected.absolute(), f"127.0.0.1:{actual.absolute()}")
+        await receiver.wait()
+        await sender.wait()
+        f = open(actual.absolute(), 'rb')
+        actual_text = f.read()
+        f.close()
+
+        self.assertEqual(0, receiver.returncode)
+        self.assertEqual(0, sender.returncode)
+        self.assertEqual(expected_text, actual_text)
+        expected_info = os.stat(expected.absolute())
+        actual_info = os.stat(actual.absolute())
+        self.assertEqual(expected_info.st_mode, actual_info.st_mode)
+
+        dir.cleanup()
+
+    async def test_incp_src_file_dest_dir_dest_file_exists(self):
+        '''
+        It should truncate the file and write the contents of source file to
+        destination directory. It should not change the permission bits of the
+        destination file.
+        '''
+        expected_text = b'hello, world\n'
+        dir = tempfile.TemporaryDirectory()
+        output_dir = Path.joinpath(Path(dir.name), 'output_dir')
+        os.mkdir(output_dir)
+        expected = Path.joinpath(Path(dir.name), 'expected.txt')
+        actual = Path.joinpath(output_dir, 'expected.txt')
+        fin = open(expected.absolute(), 'wb')
+        fin.write(expected_text)
+        fin.close()
+        os.chmod(expected.absolute(), stat.S_IREAD)
+        fout = open(actual.absolute(), 'wb')
+        fout.write(b'Test text that\n\t should be truncated')
+        fout.close()
+        os.chmod(actual.absolute(), stat.S_IREAD | stat.S_IWRITE)
+
+        receiver = await asyncio.create_subprocess_exec('./incp', '-l', '4628')
+        await asyncio.sleep(0.5)
+        sender = await asyncio.create_subprocess_exec('./incp', expected.absolute(), f"127.0.0.1:4628:{output_dir.absolute()}")
+        await receiver.wait()
+        await sender.wait()
+
+        self.assertEqual(receiver.returncode, 0)
+        self.assertEqual(sender.returncode, 0)
+        f = open(actual.absolute(), 'rb')
+        actual_text = f.read()
+        f.close()
+        self.assertEqual(expected_text, actual_text)
+        actual_info = os.stat(actual.absolute())
+        self.assertTrue(stat.S_ISREG(actual_info.st_mode))
+        self.assertEqual(actual_info.st_mode & stat.S_IREAD, stat.S_IREAD)
+        self.assertEqual(actual_info.st_mode & stat.S_IWRITE, stat.S_IWRITE)
+        self.assertEqual(actual_info.st_mode & stat.S_IEXEC, 0)
+        # I do not think Windows has a concept of group and other for file
+        # permissions so these would always fail.
+        if (os.name == 'posix'):
+            self.assertEqual(actual_info.st_mode & stat.S_IRGRP, 0)
+            self.assertEqual(actual_info.st_mode & stat.S_IWGRP, 0)
+            self.assertEqual(actual_info.st_mode & stat.S_IXGRP, 0)
+            self.assertEqual(actual_info.st_mode & stat.S_IROTH, 0)
+            self.assertEqual(actual_info.st_mode & stat.S_IWOTH, 0)
+            self.assertEqual(actual_info.st_mode & stat.S_IXOTH, 0)
+
+        dir.cleanup()
+
+    async def test_incp_src_file_dest_dir_dest_file_does_not_exist(self):
+        '''
+        It should create the destination file and copy the source file when the
+        file in destination directory does not exist. It should set the
+        permission bits of dest file to the same as source file.
+        '''
+        expected_text = b'hello, world\n\nSome test \t\t\t TEXT\n'
+        dir = tempfile.TemporaryDirectory()
+        output_dir = Path.joinpath(Path(dir.name), 'output_dir')
+        os.mkdir(output_dir)
+        expected = Path.joinpath(Path(dir.name), 'expected.txt')
+        actual = Path.joinpath(output_dir, 'expected.txt')
+        f = open(expected.absolute(), 'wb')
+        f.write(expected_text)
+        f.close()
+        os.chmod(expected.absolute(), stat.S_IREAD)
+
+        receiver = await asyncio.create_subprocess_exec('./incp', '-l')
+        await asyncio.sleep(0.5)
+        sender = await asyncio.create_subprocess_exec('./incp', expected.absolute(), f"127.0.0.1:{output_dir.absolute()}")
         await receiver.wait()
         await sender.wait()
         f = open(actual.absolute(), 'rb')

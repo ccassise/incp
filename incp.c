@@ -94,63 +94,63 @@ typedef struct FileInfo {
 static int fileinfo_parse(FileInfo* finfo, char* fileinfo)
 {
     char* str = fileinfo;
-    const char* delim = " ";
-    char* token = strtok(str, delim);
-    if (token == NULL) {
+    const char delim = ' ';
+    char* prop_end = strchr(str, delim);
+    if (prop_end == NULL) {
         return -1;
     }
+    prop_end[0] = '\0';
     /* Parse mode. */
     finfo->mode = 0;
-    size_t token_len = strlen(token);
-    if (token_len < 10) {
+    size_t prop_len = strlen(str);
+    if (prop_len < 10) {
         return -1;
     }
-    if (token[0] != 'd' && token[0] != '-') {
+    if (str[0] != 'd' && str[0] != '-') {
         return -1;
     }
-    if (token[0] == 'd') {
+    if (str[0] == 'd') {
         finfo->mode = FILEINFO_ISDIR;
     } else {
         finfo->mode = FILEINFO_ISREG;
     }
-    if (token[1] == 'r')
+    if (str[1] == 'r')
         finfo->mode |= FILEINFO_IRUSR;
-    if (token[2] == 'w')
+    if (str[2] == 'w')
         finfo->mode |= FILEINFO_IWUSR;
-    if (token[3] == 'x')
+    if (str[3] == 'x')
         finfo->mode |= FILEINFO_IXUSR;
-    if (token[4] == 'r')
+    if (str[4] == 'r')
         finfo->mode |= FILEINFO_IRGRP;
-    if (token[5] == 'w')
+    if (str[5] == 'w')
         finfo->mode |= FILEINFO_IWGRP;
-    if (token[6] == 'x')
+    if (str[6] == 'x')
         finfo->mode |= FILEINFO_IXGRP;
-    if (token[7] == 'r')
+    if (str[7] == 'r')
         finfo->mode |= FILEINFO_IROTH;
-    if (token[8] == 'w')
+    if (str[8] == 'w')
         finfo->mode |= FILEINFO_IWOTH;
-    if (token[9] == 'x')
+    if (str[9] == 'x')
         finfo->mode |= FILEINFO_IXOTH;
-    token = strtok(NULL, delim);
-    if (token == NULL) {
+    str = prop_end + 1;
+    prop_end = strchr(str, delim);
+    if (prop_end == NULL) {
         return -1;
     }
+    prop_end[0] = '\0';
     /* Parse size. */
     errno = 0;
-    finfo->size = strtoull(token, NULL, 10);
+    finfo->size = strtoull(str, NULL, 10);
     if (finfo->size == ULLONG_MAX && errno == ERANGE) {
         return -1;
     }
-    token = strtok(NULL, delim);
-    if (token == NULL) {
-        return -1;
-    }
     /* Parse name. */
-    size_t len = strlen(token);
+    str = prop_end + 1;
+    size_t len = strlen(str);
     if (len >= (sizeof(finfo->name) - 1)) {
         return -1;
     }
-    strcpy(finfo->name, token);
+    strcpy(finfo->name, str);
 
     return 0;
 }
