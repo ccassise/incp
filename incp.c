@@ -15,11 +15,17 @@
 
 typedef ptrdiff_t ssize_t;
 
+typedef SOCKET OS_SOCKET;
+#define OS_INVALID_SOCKET INVALID_SOCKET
+
 #else /* Unix */
 
 #include <netdb.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+typedef int OS_SOCKET;
+#define OS_INVALID_SOCKET (-1)
 
 #endif
 
@@ -57,7 +63,7 @@ typedef ptrdiff_t ssize_t;
 #define FILEINFO_ISREG (1 << 10) /* Regular file. */
 #define FILEINFO_ISLNK (1 << 11) /* Symbolic link. */
 
-void print_usage(void)
+static void print_usage(void)
 {
     puts("USAGE:");
     puts("\tincp -l [port]");
@@ -243,12 +249,21 @@ static void fileinfo_setperm(FileInfo* finfo, const struct stat* s)
 #endif
 }
 
+static int os_closesocket(OS_SOCKET s)
+{
+#if defined(_WIN32)
+    return closesocket(s);
+#else
+    return close(s);
+#endif
+}
+
 /**
  * Sends all bytes in a buffer.
  *
  * Returns the number of bytes sent or -1 if an error occurred.
  */
-static ssize_t send_all(int sockfd, const void* buffer, size_t n, int flags)
+static ssize_t send_all(OS_SOCKET sockfd, const void* buffer, size_t n, int flags)
 {
     ssize_t nsent = 0;
     ssize_t sent_total = 0;
@@ -272,7 +287,7 @@ static ssize_t send_all(int sockfd, const void* buffer, size_t n, int flags)
  * Return the length of the string or -1 if an error occurred or if buffer is
  * filled before finding CRLF.
  */
-static ssize_t recv_str(int sockfd, void* buffer, size_t n, int flags)
+static ssize_t recv_str(OS_SOCKET sockfd, void* buffer, size_t n, int flags)
 {
     ssize_t nread = 0;
     size_t read_total = 0;
@@ -301,7 +316,7 @@ static ssize_t recv_str(int sockfd, void* buffer, size_t n, int flags)
     return read_total;
 }
 
-static int send_file(int sockfd, void* buffer, size_t n, int flags, FILE* srcfile)
+static int send_file(OS_SOCKET sockfd, void* buffer, size_t n, int flags, FILE* srcfile)
 {
     size_t nread = 0;
     while ((nread = fread(buffer, 1, n, srcfile)) > 0) {
@@ -312,7 +327,7 @@ static int send_file(int sockfd, void* buffer, size_t n, int flags, FILE* srcfil
     return 0;
 }
 
-static int recv_file(int sockfd, void* buffer, size_t n, int flags, FILE* outfile, size_t fsize)
+static int recv_file(OS_SOCKET sockfd, void* buffer, size_t n, int flags, FILE* outfile, size_t fsize)
 {
     ssize_t nread = 0;
     size_t read_total = 0;
@@ -336,7 +351,7 @@ static int recv_file(int sockfd, void* buffer, size_t n, int flags, FILE* outfil
 /**
  * Exponential backoff on connection tries.
  */
-static int connect_retry(int sockfd, const struct sockaddr* addr, socklen_t socklen)
+static int connect_retry(OS_SOCKET sockfd, const struct sockaddr* addr, socklen_t socklen)
 {
     int maxsleep = 64; /* About 1 minute. */
     for (int numsec = 1; numsec < maxsleep; numsec <<= 1) {
@@ -394,7 +409,7 @@ static int incp_connect(int argc, char* argv[])
     struct addrinfo* ailist;
     struct addrinfo* aip;
     struct addrinfo hints;
-    int sockfd = -1;
+    OS_SOCKET sockfd = OS_INVALID_SOCKET;
     int err = 0;
 
     memset(&hints, 0, sizeof(hints));
@@ -414,21 +429,17 @@ static int incp_connect(int argc, char* argv[])
         return -1;
     }
     for (aip = ailist; aip != NULL; aip = aip->ai_next) {
-        if ((sockfd = socket(aip->ai_family, aip->ai_socktype, aip->ai_protocol)) <= 0) {
+        if ((sockfd = socket(aip->ai_family, aip->ai_socktype, aip->ai_protocol)) == OS_INVALID_SOCKET) {
             continue;
         }
         if (connect_retry(sockfd, aip->ai_addr, aip->ai_addrlen) != 0) {
-#if defined(_WIN32)
-            closesocket(sockfd);
-#else
-            close(sockfd);
-#endif
-            sockfd = -1;
+            os_closesocket(sockfd);
+            sockfd = OS_INVALID_SOCKET;
             continue;
         }
         break;
     }
-    if (sockfd <= 0) {
+    if (sockfd == OS_INVALID_SOCKET) {
         perror("Error");
         freeaddrinfo(ailist);
         return -1;
@@ -552,11 +563,7 @@ cleanup:
     if (srcfile != NULL) {
         fclose(srcfile);
     }
-#if defined(_WIN32)
-    closesocket(sockfd);
-#else
-    close(sockfd);
-#endif
+    os_closesocket(sockfd);
     freeaddrinfo(ailist);
     return err;
 }
@@ -566,7 +573,7 @@ static int incp_listen(const char* port)
     struct addrinfo* ailist;
     struct addrinfo* aip;
     struct addrinfo hints;
-    int sockfd = -1;
+    OS_SOCKET sockfd = INVALID_SOCKET;
     int err = 0;
 
     memset(&hints, 0, sizeof(hints));
@@ -579,35 +586,23 @@ static int incp_listen(const char* port)
         return -1;
     }
     for (aip = ailist; aip != NULL; aip = aip->ai_next) {
-        if ((sockfd = socket(aip->ai_family, aip->ai_socktype, aip->ai_protocol)) <= 0) {
+        if ((sockfd = socket(aip->ai_family, aip->ai_socktype, aip->ai_protocol)) == OS_INVALID_SOCKET) {
             continue;
         }
         int on = 1;
-        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) != 0) {
-#if defined(_WIN32)
-            closesocket(sockfd);
-#else
-            close(sockfd);
-#endif
-            sockfd = -1;
+        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (void*)&on, sizeof(on)) != 0) {
+            os_closesocket(sockfd);
+            sockfd = OS_INVALID_SOCKET;
             continue;
         }
         if (bind(sockfd, aip->ai_addr, aip->ai_addrlen) != 0) {
-#if defined(_WIN32)
-            closesocket(sockfd);
-#else
-            close(sockfd);
-#endif
-            sockfd = -1;
+            os_closesocket(sockfd);
+            sockfd = OS_INVALID_SOCKET;
             continue;
         }
         if (listen(sockfd, BACKLOG) != 0) {
-#if defined(_WIN32)
-            closesocket(sockfd);
-#else
-            close(sockfd);
-#endif
-            sockfd = -1;
+            os_closesocket(sockfd);
+            sockfd = OS_INVALID_SOCKET;
             continue;
         }
         break;
@@ -615,15 +610,15 @@ static int incp_listen(const char* port)
 
     freeaddrinfo(ailist);
 
-    if (sockfd <= 0) {
+    if (sockfd == OS_INVALID_SOCKET) {
         perror("Error: failed to start server");
         return -1;
     }
 
     struct sockaddr_storage client_addr;
     socklen_t client_addr_size = sizeof(client_addr);
-    int clientfd = accept(sockfd, (struct sockaddr*)&client_addr, &client_addr_size);
-    if (clientfd < 0) {
+    OS_SOCKET clientfd = accept(sockfd, (struct sockaddr*)&client_addr, &client_addr_size);
+    if (clientfd == OS_INVALID_SOCKET) {
         perror("Error: accept");
         return -1;
     }
@@ -755,13 +750,8 @@ cleanup:
     if (outfile != NULL) {
         fclose(outfile);
     }
-#if defined(_WIN32)
-    closesocket(clientfd);
-    closesocket(sockfd);
-#else
-    close(clientfd);
-    close(sockfd);
-#endif
+    os_closesocket(clientfd);
+    os_closesocket(sockfd);
     return err;
 }
 
