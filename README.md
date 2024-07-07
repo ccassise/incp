@@ -37,9 +37,9 @@ Strings are text that ends in a CRLF, e.g.
 HELLO\r\n
 ```
 
-File info contains three space-separated columns. The columns are file type and file permission info, file size in bytes, and the file path. Everything after size is considered part of the path, so paths may contain spaces, e.g.
+File info contains three space-separated columns and ends with a CRLF. The columns are file type and file permission info, file size in bytes, and the file path. Everything after size is considered part of the path, so paths may contain spaces, e.g.
 ```
--rwxrw-rw- 1234 path/to/file
+-rwxrw-rw- 1234 path/to/file\r\n
 ```
 
 Raw data is only transferred after file info has been transferred. The raw data shall be exactly the same amount of bytes as was given in the file info size.
