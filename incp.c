@@ -29,6 +29,7 @@ typedef int OS_SOCKET;
 
 #endif
 
+#include <ctype.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdbool.h>
@@ -573,7 +574,7 @@ static int incp_listen(const char* port)
     struct addrinfo* ailist;
     struct addrinfo* aip;
     struct addrinfo hints;
-    OS_SOCKET sockfd = INVALID_SOCKET;
+    OS_SOCKET sockfd = OS_INVALID_SOCKET;
     int err = 0;
 
     memset(&hints, 0, sizeof(hints));
