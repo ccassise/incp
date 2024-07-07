@@ -7,19 +7,20 @@ TARGET  = incp
 SOURCES = incp.c
 OBJECTS = incp.o
 
-sanitize: CFLAGS += -fsanitize=address
-sanitize: LDFLAGS += -static-libasan
-
-release: CFLAGS += -O3 -DNDEBUG
-
 $(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-.PHONY: sanitize
-sanitize: $(TARGET)
-
 .PHONY: release
-release: $(TARGET)
+release:
+	$(MAKE) CFLAGS="$(CFLAGS) -O3 -DNDEBUG"
+
+.PHONY: sanitize-gcc
+sanitize-gcc:
+	$(MAKE) CFLAGS="$(CFLAGS) -fsanitize=address" LDFLAGS="$(LDFLAGS) -static-libasan"
+
+.PHONY: sanitize-clang
+sanitize-clang:
+	$(MAKE) CFLAGS="$(CFLAGS) -fsanitize=address" LDFLAGS="$(LDFLAGS) -static-libsan"
 
 .PHONY: test
 test:
