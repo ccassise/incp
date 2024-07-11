@@ -77,7 +77,7 @@ static void print_usage(void)
 
 typedef struct FileInfo {
     int32_t mode;
-    size_t size;
+    unsigned long long size;
     char name[1024];
 } FileInfo;
 
@@ -169,7 +169,7 @@ static int fileinfo_snprint(const FileInfo* finfo, char* str, size_t n)
     modestr[8] = finfo->mode & FILEINFO_IWOTH ? 'w' : '-';
     modestr[9] = finfo->mode & FILEINFO_IXOTH ? 'x' : '-';
     modestr[10] = '\0';
-    return snprintf(str, n, "%s %zu %s", modestr, finfo->size, finfo->name);
+    return snprintf(str, n, "%s %llu %s", modestr, finfo->size, finfo->name);
 }
 
 /**
@@ -731,6 +731,7 @@ static int incp_listen(const char* port)
             }
             strcpy(path, destfinfo.name);
         }
+        printf("%s\n", path);
         FileInfo info_tocopy;
         memset(&info_tocopy, 0, sizeof(info_tocopy));
         if (OS_STAT(path, &s) == 0) {
