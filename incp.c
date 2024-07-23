@@ -91,11 +91,11 @@ typedef struct FileInfo {
  *
  * Returns 0 on success or -1 if not given a valid file info string.
  */
-static int fileinfo_parse(FileInfo* finfo, char* fileinfo)
+static int fileinfo_parse(FileInfo *finfo, char *fileinfo)
 {
-    char* str = fileinfo;
+    char *str = fileinfo;
     const char delim = ' ';
-    char* prop_end = strchr(str, delim);
+    char *prop_end = strchr(str, delim);
     if (prop_end == NULL) {
         return -1;
     }
@@ -155,7 +155,7 @@ static int fileinfo_parse(FileInfo* finfo, char* fileinfo)
     return 0;
 }
 
-static int fileinfo_snprint(const FileInfo* finfo, char* str, size_t n)
+static int fileinfo_snprint(const FileInfo *finfo, char *str, size_t n)
 {
     char modestr[11];
     modestr[0] = finfo->mode & FILEINFO_ISDIR ? 'd' : '-';
@@ -178,7 +178,7 @@ static int fileinfo_snprint(const FileInfo* finfo, char* str, size_t n)
  * On success, zero is returned. On error, -1 is returned and errno is set
  * appropriately.
  */
-static int fileinfo_cpyperm(const FileInfo* finfo, char* path)
+static int fileinfo_cpyperm(const FileInfo *finfo, char *path)
 {
 #if defined(_WIN32)
     unsigned short perms = 0;
@@ -216,7 +216,7 @@ static int fileinfo_cpyperm(const FileInfo* finfo, char* path)
 /**
  * Copy permissions from a stat structure to file info structure.
  */
-static void fileinfo_setperm(FileInfo* finfo, const struct OS_STAT* s)
+static void fileinfo_setperm(FileInfo *finfo, const struct OS_STAT *s)
 {
     finfo->mode = 0;
     if ((s->st_mode & S_IFMT) == S_IFDIR)
@@ -257,7 +257,7 @@ static void fileinfo_setperm(FileInfo* finfo, const struct OS_STAT* s)
 /**
  * Converts all Windows path separators \ to /.
  */
-static void normalize_sep(char* path)
+static void normalize_sep(char *path)
 {
     for (; *path; path++) {
         if (*path == '\\') {
@@ -280,13 +280,13 @@ static int os_closesocket(OS_SOCKET s)
  *
  * Returns the number of bytes sent or -1 if an error occurred.
  */
-static ssize_t send_all(OS_SOCKET sockfd, const void* buffer, size_t n, int flags)
+static ssize_t send_all(OS_SOCKET sockfd, const void *buffer, size_t n, int flags)
 {
     ssize_t nsent = 0;
     ssize_t sent_total = 0;
-    while ((nsent = send(sockfd, buffer, n, flags)) > 0) {
+    while ((nsent = send(sockfd, (char *)buffer + sent_total, n - (size_t)sent_total, flags)) > 0) {
         sent_total += nsent;
-        if (sent_total == (ssize_t)n) {
+        if ((size_t)sent_total >= n) {
             break;
         }
     }
@@ -304,12 +304,12 @@ static ssize_t send_all(OS_SOCKET sockfd, const void* buffer, size_t n, int flag
  * Return the length of the string or -1 if an error occurred or if buffer is
  * filled before finding CRLF.
  */
-static ssize_t recv_str(OS_SOCKET sockfd, void* buffer, size_t n, int flags)
+static ssize_t recv_str(OS_SOCKET sockfd, void *buffer, size_t n, int flags)
 {
     ssize_t nread = 0;
     size_t read_total = 0;
     while (1) {
-        nread = recv(sockfd, ((char*)buffer) + read_total, n - read_total, flags);
+        nread = recv(sockfd, ((char *)buffer) + read_total, n - read_total, flags);
         if (nread <= 0) {
             if (nread < 0 && errno == EINTR) {
                 continue;
@@ -323,17 +323,17 @@ static ssize_t recv_str(OS_SOCKET sockfd, void* buffer, size_t n, int flags)
             return -1;
         }
         /* We are assuming a CR is always followed by a LF */
-        char* pos = memchr(buffer, '\r', read_total);
+        char *pos = memchr(buffer, '\r', read_total);
         if (pos != NULL) {
             *pos = '\0';
-            read_total = pos - (char*)buffer;
+            read_total = pos - (char *)buffer;
             break;
         }
     }
     return read_total;
 }
 
-static int send_file(OS_SOCKET sockfd, void* buffer, size_t n, int flags, FILE* srcfile)
+static int send_file(OS_SOCKET sockfd, void *buffer, size_t n, int flags, FILE *srcfile)
 {
     size_t nread = 0;
     while ((nread = fread(buffer, 1, n, srcfile)) > 0) {
@@ -344,7 +344,7 @@ static int send_file(OS_SOCKET sockfd, void* buffer, size_t n, int flags, FILE* 
     return 0;
 }
 
-static int recv_file(OS_SOCKET sockfd, void* buffer, size_t n, int flags, FILE* outfile, size_t fsize)
+static int recv_file(OS_SOCKET sockfd, void *buffer, size_t n, int flags, FILE *outfile, size_t fsize)
 {
     ssize_t nread = 0;
     size_t read_total = 0;
@@ -368,7 +368,7 @@ static int recv_file(OS_SOCKET sockfd, void* buffer, size_t n, int flags, FILE* 
 /**
  * Exponential backoff on connection tries.
  */
-static int connect_retry(OS_SOCKET sockfd, const struct sockaddr* addr, socklen_t socklen)
+static int connect_retry(OS_SOCKET sockfd, const struct sockaddr *addr, socklen_t socklen)
 {
     int maxsleep = 64; /* About 1 minute. */
     for (int numsec = 1; numsec < maxsleep; numsec <<= 1) {
@@ -396,11 +396,11 @@ static int connect_retry(OS_SOCKET sockfd, const struct sockaddr* addr, socklen_
  * Returns -1 if it is not a valid input string, otherwise returns 0 and sets
  * the given strings.
  */
-static int parse_destination(char* str, char** address, char** port, char** dest)
+static int parse_destination(char *str, char **address, char **port, char **dest)
 {
     const char delim = ':';
     *address = *port = *dest = NULL;
-    char* ptr = strchr(str, delim);
+    char *ptr = strchr(str, delim);
     if (ptr == NULL) {
         return -1;
     }
@@ -421,10 +421,10 @@ static int parse_destination(char* str, char** address, char** port, char** dest
     return 0;
 }
 
-static int incp_connect(int argc, char* argv[])
+static int incp_connect(int argc, char *argv[])
 {
-    struct addrinfo* ailist;
-    struct addrinfo* aip;
+    struct addrinfo *ailist;
+    struct addrinfo *aip;
     struct addrinfo hints;
     OS_SOCKET sockfd = OS_INVALID_SOCKET;
     int err = 0;
@@ -462,7 +462,7 @@ static int incp_connect(int argc, char* argv[])
         return -1;
     }
 
-    FILE* srcfile = NULL;
+    FILE *srcfile = NULL;
     FileInfo finfo;
     memset(&finfo, 0, sizeof(finfo));
     int send_len = 0;
@@ -585,10 +585,10 @@ cleanup:
     return err;
 }
 
-static int incp_listen(const char* port)
+static int incp_listen(const char *port)
 {
-    struct addrinfo* ailist;
-    struct addrinfo* aip;
+    struct addrinfo *ailist;
+    struct addrinfo *aip;
     struct addrinfo hints;
     OS_SOCKET sockfd = OS_INVALID_SOCKET;
     int err = 0;
@@ -607,7 +607,7 @@ static int incp_listen(const char* port)
             continue;
         }
         int on = 1;
-        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (void*)&on, sizeof(on)) != 0) {
+        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (void *)&on, sizeof(on)) != 0) {
             os_closesocket(sockfd);
             sockfd = OS_INVALID_SOCKET;
             continue;
@@ -634,13 +634,13 @@ static int incp_listen(const char* port)
 
     struct sockaddr_storage client_addr;
     socklen_t client_addr_size = sizeof(client_addr);
-    OS_SOCKET clientfd = accept(sockfd, (struct sockaddr*)&client_addr, &client_addr_size);
+    OS_SOCKET clientfd = accept(sockfd, (struct sockaddr *)&client_addr, &client_addr_size);
     if (clientfd == OS_INVALID_SOCKET) {
         perror("Error: accept");
         return -1;
     }
 
-    FILE* outfile = NULL;
+    FILE *outfile = NULL;
     FileInfo destfinfo;
     memset(&destfinfo, 0, sizeof(destfinfo));
     FileInfo srcfinfo;
@@ -706,7 +706,7 @@ static int incp_listen(const char* port)
         /* Copy file to destination. */
         char path[1024];
         if (destfinfo.mode & FILEINFO_ISDIR) {
-            char* name = strrchr(srcfinfo.name, '/'); /* Only get the file name. */
+            char *name = strrchr(srcfinfo.name, '/'); /* Only get the file name. */
             if (name != NULL) {
                 name++; /* Do not start the name with '/'. */
             } else {
@@ -775,7 +775,7 @@ cleanup:
     return err;
 }
 
-int main(int argc, char* argv[])
+int main(int argc, char *argv[])
 {
     if (argc < 2) {
         print_usage();
@@ -797,7 +797,7 @@ int main(int argc, char* argv[])
     }
 
     if (is_listen) {
-        char* port = NULL;
+        char *port = NULL;
         if (argc >= 3) {
             port = argv[2];
         }
