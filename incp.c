@@ -319,7 +319,6 @@ static ssize_t recv_str(OS_SOCKET sockfd, void *buffer, size_t n, int flags)
         }
         read_total += nread;
         if (read_total >= n) {
-            printf("read_total");
             return -1;
         }
         /* We are assuming a CR is always followed by a LF */
